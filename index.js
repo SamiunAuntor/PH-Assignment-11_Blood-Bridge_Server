@@ -39,9 +39,10 @@ app.post("/register-user", async (req, res) => {
     try {
         const { name, email, bloodGroup, district, upazila, avatar } = req.body;
 
-        if (!name || !email || !bloodGroup || !district || !upazila || !avatar) {
+        if (!name || !email || !bloodGroup || !district || !upazila) {
             return res.status(400).json({ message: "All fields are required" });
         }
+
 
         const usersCollection = db.collection("users");
         const existingUser = await usersCollection.findOne({ email });
@@ -69,6 +70,33 @@ app.post("/register-user", async (req, res) => {
         res.status(500).json({ message: "Server error" });
     }
 });
+
+// Get user role API
+app.get("/get-user-role", async (req, res) => {
+    try {
+        const { email } = req.query;
+
+        if (!email) {
+            return res.status(400).json({ message: "Email is required" });
+        }
+
+        const usersCollection = db.collection("users");
+        const user = await usersCollection.findOne(
+            { email },
+            { projection: { role: 1, _id: 0 } }
+        );
+
+        if (!user) {
+            return res.status(404).json({ message: "User not found" });
+        }
+
+        res.status(200).json({ role: user.role });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: "Server error" });
+    }
+});
+
 
 // Start Server
 const PORT = process.env.PORT || 5000;
