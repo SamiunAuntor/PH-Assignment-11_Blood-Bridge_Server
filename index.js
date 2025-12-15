@@ -206,6 +206,27 @@ app.get("/dashboard/my-donation-requests", verifyFirebaseToken, async (req, res)
     }
 });
 
+// Update Donation Request
+app.put("/dashboard/donation-request/:id", verifyFirebaseToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const updates = req.body;
+
+        const donationRequestsCollection = db.collection("donationRequests");
+        const request = await donationRequestsCollection.findOne({ _id: new ObjectId(id) });
+
+        if (!request) return res.status(404).json({ message: "Donation request not found" });
+        if (request.requesterEmail !== req.user.email) return res.status(403).json({ message: "Not allowed" });
+
+        await donationRequestsCollection.updateOne({ _id: new ObjectId(id) }, { $set: updates });
+
+        res.status(200).json({ message: "Donation request updated" });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: "Server error" });
+    }
+});
+
 
 
 // START SERVER 
