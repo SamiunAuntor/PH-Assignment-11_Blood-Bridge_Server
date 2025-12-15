@@ -141,6 +141,47 @@ app.get("/get-user-role", async (req, res) => {
     }
 });
 
+// DONATION REQUEST APIS
+
+// Create Donation Request
+app.post("/dashboard/create-donation-request", verifyFirebaseToken, async (req, res) => {
+    try {
+        const { recipientName, recipientDistrict, recipientUpazila, hospitalName, address, bloodGroup, donationDate, donationTime, message } = req.body;
+
+        const usersCollection = db.collection("users");
+        const currentUser = await usersCollection.findOne({ email: req.user.email });
+
+        if (!currentUser || currentUser.status === "blocked") {
+            return res.status(403).json({ message: "Blocked user cannot create donation request" });
+        }
+
+        const donationRequestsCollection = db.collection("donationRequests");
+
+        const newRequest = {
+            requesterName: currentUser.name,
+            requesterEmail: currentUser.email,
+            recipientName,
+            recipientDistrict,
+            recipientUpazila,
+            hospitalName,
+            address,
+            bloodGroup,
+            donationDate,
+            donationTime,
+            message,
+            status: "pending",
+            createdAt: new Date(),
+        };
+
+        await donationRequestsCollection.insertOne(newRequest);
+
+        res.status(201).json({ message: "Donation request created", donationRequest: newRequest });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: "Server error" });
+    }
+});
+
 
 
 // START SERVER 
