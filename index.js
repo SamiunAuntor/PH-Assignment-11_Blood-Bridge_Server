@@ -336,7 +336,26 @@ app.put("/dashboard/user/:id", verifyFirebaseToken, requireRole("admin"), async 
     }
 });
 
+// PUBLIC API
+// Search Donors
+app.get("/search-donors", async (req, res) => {
+    try {
+        const { bloodGroup, district, upazila } = req.query;
+        const usersCollection = db.collection("users");
 
+        const query = { role: "donor", status: "active" };
+        if (bloodGroup) query.bloodGroup = bloodGroup;
+        if (district) query.district = district;
+        if (upazila) query.upazila = upazila;
+
+        const donors = await usersCollection.find(query).toArray();
+
+        res.status(200).json({ total: donors.length, donors });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: "Server error" });
+    }
+});
 
 
 // START SERVER 
