@@ -246,7 +246,58 @@ app.delete("/dashboard/donation-request/:id", verifyFirebaseToken, async (req, r
     }
 });
 
+// Get All Donation Requests (Admin & Volunteer)
+app.get("/dashboard/all-blood-donation-request", verifyFirebaseToken, async (req, res) => {
+    try {
+        const donationRequestsCollection = db.collection("donationRequests");
+        const usersCollection = db.collection("users");
 
+        const currentUser = await usersCollection.findOne({ email: req.user.email });
+        if (!currentUser) return res.status(404).json({ message: "User not found" });
+
+        const { status, page = 1, limit = 10 } = req.query;
+
+        const query = {};
+        if (status) query.status = status;
+
+        const cursor = donationRequestsCollection.find(query).sort({ createdAt: -1 });
+        const total = await cursor.count();
+        const requests = await cursor.skip((page - 1) * limit).limit(parseInt(limit)).toArray();
+
+        res.status(200).json({ total, page: parseInt(page), limit: parseInt(limit), requests });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: "Server error" });
+    }
+});
+
+// Update Donation Status (Admin & Volunteer)
+app.put("/dashboard/donation-request/:id/status", verifyFirebaseToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { status } = req.body;
+
+        const donationRequestsCollection = db.collection("donationRequests");
+        const usersCollection = db.collection("users");
+
+        const currentUser = await usersCollection.findOne({ email: req.user.email });
+        if (!currentUser) return res.status(404).json({ message: "User not found" });
+
+        if (!["pending", "inprogress", "done", "canceled"].includes(status)) {
+            return res.status(400).json({ message: "Invalid status" });
+        }
+
+        const request = await donationRequestsCollection.findOne({ _id: new ObjectId(id) });
+        if (!request) return res.status(404).json({ message: "Donation request not found" });
+
+        await donationRequestsCollection.updateOne({ _id: new ObjectId(id) }, { $set: { status } });
+
+        res.status(200).json({ message: "Donation status updated" });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: "Server error" });
+    }
+});
 
 // START SERVER 
 const PORT = process.env.PORT || 5000;
