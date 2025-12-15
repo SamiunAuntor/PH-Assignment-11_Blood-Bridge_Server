@@ -299,6 +299,46 @@ app.put("/dashboard/donation-request/:id/status", verifyFirebaseToken, async (re
     }
 });
 
+// ADMIN APIS
+
+// Get All Users
+app.get("/dashboard/all-users", verifyFirebaseToken, requireRole("admin"), async (req, res) => {
+    try {
+        const usersCollection = db.collection("users");
+        const { status, page = 1, limit = 10 } = req.query;
+
+        const query = {};
+        if (status) query.status = status;
+
+        const total = await usersCollection.countDocuments(query);
+        const users = await usersCollection.find(query).skip((page - 1) * limit).limit(parseInt(limit)).toArray();
+
+        res.status(200).json({ total, page: parseInt(page), limit: parseInt(limit), users });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: "Server error" });
+    }
+});
+
+// Update User Role
+app.put("/dashboard/user/:id", verifyFirebaseToken, requireRole("admin"), async (req, res) => {
+    try {
+        const { id } = req.params;
+        const updates = req.body;
+
+        const usersCollection = db.collection("users");
+        await usersCollection.updateOne({ _id: new ObjectId(id) }, { $set: updates });
+
+        res.status(200).json({ message: "User updated successfully" });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: "Server error" });
+    }
+});
+
+
+
+
 // START SERVER 
 const PORT = process.env.PORT || 5000;
 
