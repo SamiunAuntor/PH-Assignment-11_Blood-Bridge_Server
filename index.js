@@ -227,6 +227,25 @@ app.put("/dashboard/donation-request/:id", verifyFirebaseToken, async (req, res)
     }
 });
 
+// Delete Donation Request
+app.delete("/dashboard/donation-request/:id", verifyFirebaseToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const donationRequestsCollection = db.collection("donationRequests");
+        const request = await donationRequestsCollection.findOne({ _id: new ObjectId(id) });
+
+        if (!request) return res.status(404).json({ message: "Donation request not found" });
+        if (request.requesterEmail !== req.user.email) return res.status(403).json({ message: "Not allowed" });
+
+        await donationRequestsCollection.deleteOne({ _id: new ObjectId(id) });
+
+        res.status(200).json({ message: "Donation request deleted" });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: "Server error" });
+    }
+});
+
 
 
 // START SERVER 
