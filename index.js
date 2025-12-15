@@ -10,6 +10,17 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+// Firebase Admin SDK Setup
+const admin = require("firebase-admin");
+
+const serviceAccount = require("./bloodbridge-firebase-adminsdk.json");
+
+admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+});
+
+
+
 
 // MongoDB Connection
 const client = new MongoClient(process.env.MONGO_URI);
