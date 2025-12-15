@@ -182,6 +182,30 @@ app.post("/dashboard/create-donation-request", verifyFirebaseToken, async (req, 
     }
 });
 
+// Get My Donation Requests
+app.get("/dashboard/my-donation-requests", verifyFirebaseToken, async (req, res) => {
+    try {
+        const donationRequestsCollection = db.collection("donationRequests");
+        const { status, page = 1, limit = 10 } = req.query;
+
+        const query = { requesterEmail: req.user.email };
+        if (status) query.status = status;
+
+        const total = await donationRequestsCollection.countDocuments(query);
+        const requests = await donationRequestsCollection
+            .find(query)
+            .sort({ createdAt: -1 })
+            .skip((page - 1) * limit)
+            .limit(parseInt(limit))
+            .toArray();
+
+        res.status(200).json({ total, page: parseInt(page), limit: parseInt(limit), requests });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: "Server error" });
+    }
+});
+
 
 
 // START SERVER 
