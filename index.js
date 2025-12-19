@@ -60,7 +60,7 @@ const verifyFirebaseToken = async (req, res, next) => {
     }
 };
 
-// Role-based access middleware
+// Role-based access middleware (single role)
 const requireRole = (role) => {
     return async (req, res, next) => {
         try {
@@ -76,6 +76,35 @@ const requireRole = (role) => {
             res.status(500).json({ message: "Server error" });
         }
     };
+};
+
+// Role-based access middleware (any of multiple roles)
+const requireAnyRole = (roles = []) => {
+    return async (req, res, next) => {
+        try {
+            const usersCollection = db.collection("users");
+            const user = await usersCollection.findOne({ email: req.user.email });
+            if (!user || !roles.includes(user.role)) {
+                return res.status(403).json({ message: "Forbidden: Access denied" });
+            }
+            req.dbUser = user;
+            next();
+        } catch (err) {
+            console.error(err);
+            res.status(500).json({ message: "Server error" });
+        }
+    };
+};
+
+// Helper function to check if user is admin
+const isAdmin = async (email) => {
+    try {
+        const usersCollection = db.collection("users");
+        const user = await usersCollection.findOne({ email });
+        return user && user.role === "admin";
+    } catch (err) {
+        return false;
+    }
 };
 
 // APIs
@@ -135,6 +164,46 @@ app.get("/get-user-role", async (req, res) => {
         if (!user) return res.status(404).json({ message: "User not found" });
 
         res.status(200).json({ role: user.role });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: "Server error" });
+    }
+});
+
+// Get logged-in user profile
+app.get("/dashboard/profile", verifyFirebaseToken, async (req, res) => {
+    try {
+        const usersCollection = db.collection("users");
+
+        const user = await usersCollection.findOne({ email: req.user.email });
+
+        if (!user) return res.status(404).json({ message: "User not found" });
+
+        const formattedUser = {
+            ...user,
+            _id: user._id.$oid || user._id.toString(),
+            createdAt: user.createdAt.$date || user.createdAt.toISOString(),
+        };
+
+        res.status(200).json({ user: formattedUser });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: "Server error" });
+    }
+});
+
+// Update User Profile
+app.put("/dashboard/profile", verifyFirebaseToken, async (req, res) => {
+    try {
+        const { name, bloodGroup, district, upazila, avatar } = req.body;
+        const usersCollection = db.collection("users");
+
+        await usersCollection.updateOne(
+            { email: req.user.email },
+            { $set: { name, bloodGroup, district, upazila, avatar } }
+        );
+
+        res.status(200).json({ message: "Profile updated successfully" });
     } catch (err) {
         console.error(err);
         res.status(500).json({ message: "Server error" });
@@ -206,6 +275,38 @@ app.get("/dashboard/my-donation-requests", verifyFirebaseToken, async (req, res)
     }
 });
 
+// Get Single Donation Request (Public)
+app.get("/donation-request/:id", verifyFirebaseToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const donationRequestsCollection = db.collection("donationRequests");
+        const request = await donationRequestsCollection.findOne({ _id: new ObjectId(id) });
+
+        if (!request) return res.status(404).json({ message: "Request not found" });
+
+        res.status(200).json({ request });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: "Server error" });
+    }
+});
+
+// Get Single Donation Request (Dashboard)
+app.get("/dashboard/donation-request/:id", verifyFirebaseToken, async (req, res) => {
+    try {
+        const { id } = req.params;
+        const donationRequestsCollection = db.collection("donationRequests");
+        const request = await donationRequestsCollection.findOne({ _id: new ObjectId(id) });
+
+        if (!request) return res.status(404).json({ message: "Request not found" });
+
+        res.status(200).json({ request });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: "Server error" });
+    }
+});
+
 // Update Donation Request
 app.put("/dashboard/donation-request/:id", verifyFirebaseToken, async (req, res) => {
     try {
@@ -216,7 +317,12 @@ app.put("/dashboard/donation-request/:id", verifyFirebaseToken, async (req, res)
         const request = await donationRequestsCollection.findOne({ _id: new ObjectId(id) });
 
         if (!request) return res.status(404).json({ message: "Donation request not found" });
-        if (request.requesterEmail !== req.user.email) return res.status(403).json({ message: "Not allowed" });
+
+        // Check if user is admin or the requester
+        const userIsAdmin = await isAdmin(req.user.email);
+        if (!userIsAdmin && request.requesterEmail !== req.user.email) {
+            return res.status(403).json({ message: "Not allowed" });
+        }
 
         await donationRequestsCollection.updateOne({ _id: new ObjectId(id) }, { $set: updates });
 
@@ -235,7 +341,12 @@ app.delete("/dashboard/donation-request/:id", verifyFirebaseToken, async (req, r
         const request = await donationRequestsCollection.findOne({ _id: new ObjectId(id) });
 
         if (!request) return res.status(404).json({ message: "Donation request not found" });
-        if (request.requesterEmail !== req.user.email) return res.status(403).json({ message: "Not allowed" });
+
+        // Check if user is admin or the requester
+        const userIsAdmin = await isAdmin(req.user.email);
+        if (!userIsAdmin && request.requesterEmail !== req.user.email) {
+            return res.status(403).json({ message: "Not allowed" });
+        }
 
         await donationRequestsCollection.deleteOne({ _id: new ObjectId(id) });
 
@@ -246,15 +357,56 @@ app.delete("/dashboard/donation-request/:id", verifyFirebaseToken, async (req, r
     }
 });
 
-// Get All Donation Requests (Admin & Volunteer)
-app.get("/dashboard/all-blood-donation-request", verifyFirebaseToken, async (req, res) => {
+// Donate to Request (Update status to inprogress with donor info)
+app.put("/donation-request/:id/donate", verifyFirebaseToken, async (req, res) => {
     try {
+        const { id } = req.params;
+        const { donorName, donorEmail } = req.body;
+
         const donationRequestsCollection = db.collection("donationRequests");
+        const request = await donationRequestsCollection.findOne({ _id: new ObjectId(id) });
+
+        if (!request) return res.status(404).json({ message: "Request not found" });
+        if (request.status !== "pending") {
+            return res.status(400).json({ message: "Request is not pending" });
+        }
+
+        await donationRequestsCollection.updateOne(
+            { _id: new ObjectId(id) },
+            {
+                $set: {
+                    status: "inprogress",
+                    donorName,
+                    donorEmail
+                }
+            }
+        );
+
+        res.status(200).json({ message: "Donation confirmed" });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: "Server error" });
+    }
+});
+
+// Get total count of ALL users for Volunteer/Admin statistics
+app.get("/dashboard/total-users-count", verifyFirebaseToken, requireAnyRole(["admin", "volunteer"]), async (req, res) => {
+    try {
         const usersCollection = db.collection("users");
 
-        const currentUser = await usersCollection.findOne({ email: req.user.email });
-        if (!currentUser) return res.status(404).json({ message: "User not found" });
+        const totalUsers = await usersCollection.countDocuments({});
 
+        res.status(200).json({ totalUsers });
+    } catch (err) {
+        console.error("Error fetching total user count:", err);
+        res.status(500).json({ message: "Server error while fetching user statistics" });
+    }
+});
+
+// Get All Donation Requests (Admin & Volunteer)
+app.get("/dashboard/all-blood-donation-request", verifyFirebaseToken, requireAnyRole(["admin", "volunteer"]), async (req, res) => {
+    try {
+        const donationRequestsCollection = db.collection("donationRequests");
         const { status, page = 1, limit = 10 } = req.query;
 
         const query = {};
@@ -272,17 +424,12 @@ app.get("/dashboard/all-blood-donation-request", verifyFirebaseToken, async (req
 });
 
 // Update Donation Status (Admin & Volunteer)
-app.put("/dashboard/donation-request/:id/status", verifyFirebaseToken, async (req, res) => {
+app.put("/dashboard/donation-request/:id/status", verifyFirebaseToken, requireAnyRole(["admin", "volunteer"]), async (req, res) => {
     try {
         const { id } = req.params;
         const { status } = req.body;
 
         const donationRequestsCollection = db.collection("donationRequests");
-        const usersCollection = db.collection("users");
-
-        const currentUser = await usersCollection.findOne({ email: req.user.email });
-        if (!currentUser) return res.status(404).json({ message: "User not found" });
-
         if (!["pending", "inprogress", "done", "canceled"].includes(status)) {
             return res.status(400).json({ message: "Invalid status" });
         }
@@ -293,6 +440,71 @@ app.put("/dashboard/donation-request/:id/status", verifyFirebaseToken, async (re
         await donationRequestsCollection.updateOne({ _id: new ObjectId(id) }, { $set: { status } });
 
         res.status(200).json({ message: "Donation status updated" });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: "Server error" });
+    }
+});
+
+// Donor : Update own donation request status (inprogress -> done / canceled)
+app.put(
+    "/dashboard/my-donation-request/:id/status",
+    verifyFirebaseToken,
+    async (req, res) => {
+        try {
+            const { id } = req.params;
+            const { status } = req.body;
+
+            if (!["done", "canceled"].includes(status)) {
+                return res.status(400).json({ message: "Invalid status" });
+            }
+
+            const donationRequestsCollection = db.collection("donationRequests");
+
+            const request = await donationRequestsCollection.findOne({
+                _id: new ObjectId(id),
+            });
+
+            if (!request) {
+                return res.status(404).json({ message: "Donation request not found" });
+            }
+
+            // Only requester can update
+            if (request.requesterEmail !== req.user.email) {
+                return res.status(403).json({ message: "Not allowed" });
+            }
+
+            // Only inprogress can be updated
+            if (request.status !== "inprogress") {
+                return res.status(400).json({
+                    message: "Only inprogress requests can be updated",
+                });
+            }
+
+            await donationRequestsCollection.updateOne(
+                { _id: new ObjectId(id) },
+                { $set: { status } }
+            );
+
+            res.status(200).json({ message: `Marked as ${status}` });
+        } catch (err) {
+            console.error(err);
+            res.status(500).json({ message: "Server error" });
+        }
+    }
+);
+
+
+// Get Pending Donation Requests (Public - no auth required)
+app.get("/donation-requests", async (req, res) => {
+    try {
+        const donationRequestsCollection = db.collection("donationRequests");
+        const requests = await donationRequestsCollection
+            .find({ status: "pending" })
+            .sort({ createdAt: -1 })
+            .toArray();
+
+        res.status(200).json({ requests });
     } catch (err) {
         console.error(err);
         res.status(500).json({ message: "Server error" });
@@ -357,7 +569,6 @@ app.get("/search-donors", async (req, res) => {
     }
 });
 
-
 // START SERVER 
 const PORT = process.env.PORT || 5000;
 
@@ -366,3 +577,5 @@ connectDB().then(() => {
         console.log(`Server running at: \x1b[34mhttp://localhost:${PORT}\x1b[0m`);
     });
 });
+
+
