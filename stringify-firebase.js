@@ -1,5 +1,5 @@
-import fs from "fs";
-
-const json = fs.readFileSync("./bloodbridge-firebase-adminsdk.json", "utf-8");
-const singleLine = JSON.stringify(JSON.parse(json));
-console.log(singleLine);
+// encode.js
+const fs = require("fs");
+const key = fs.readFileSync("./bloodbridge-firebase-adminsdk.json", "utf8");
+const base64 = Buffer.from(key).toString("base64");
+console.log(base64);

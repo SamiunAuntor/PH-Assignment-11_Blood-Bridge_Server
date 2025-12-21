@@ -10,13 +10,16 @@ dotenv.config();
 
 // FIREBASE SETUP
 // Read Firebase service account JSON
+import { Buffer } from "buffer";
+
 if (!admin.apps.length) {
     admin.initializeApp({
         credential: admin.credential.cert(
-            JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)
+            JSON.parse(Buffer.from(process.env.FIREBASE_SERVICE_ACCOUNT, 'base64').toString('utf-8'))
         ),
     });
 }
+
 
 
 // EXPRESS SETUP
@@ -25,19 +28,35 @@ app.use(cors());
 app.use(express.json());
 
 // MONGODB SETUP
-const client = new MongoClient(process.env.MONGO_URI);
-let db;
+let cachedClient = null;
+let cachedDb = null;
 
 async function connectDB() {
-    try {
-        await client.connect();
-        db = client.db("BloodBridge");
+    if (cachedDb) return cachedDb;
+
+    if (!cachedClient) {
+        cachedClient = new MongoClient(process.env.MONGO_URI);
+        await cachedClient.connect();
         console.log("MongoDB connected");
-    } catch (err) {
-        console.error(err);
-        process.exit(1);
     }
+
+    cachedDb = cachedClient.db("BloodBridge");
+    return cachedDb;
 }
+
+// Database middleware - ensures DB is connected and attaches to req
+const dbMiddleware = async (req, res, next) => {
+    try {
+        req.db = await connectDB();
+        next();
+    } catch (err) {
+        console.error("Database connection error:", err);
+        res.status(500).json({ message: "Database connection failed" });
+    }
+};
+
+// Apply database middleware to all routes
+app.use(dbMiddleware);
 
 // MIDDLEWARES
 
@@ -64,7 +83,7 @@ const verifyFirebaseToken = async (req, res, next) => {
 const requireRole = (role) => {
     return async (req, res, next) => {
         try {
-            const usersCollection = db.collection("users");
+            const usersCollection = req.db.collection("users");
             const user = await usersCollection.findOne({ email: req.user.email });
             if (!user || user.role !== role) {
                 return res.status(403).json({ message: "Forbidden: Access denied" });
@@ -82,7 +101,7 @@ const requireRole = (role) => {
 const requireAnyRole = (roles = []) => {
     return async (req, res, next) => {
         try {
-            const usersCollection = db.collection("users");
+            const usersCollection = req.db.collection("users");
             const user = await usersCollection.findOne({ email: req.user.email });
             if (!user || !roles.includes(user.role)) {
                 return res.status(403).json({ message: "Forbidden: Access denied" });
@@ -97,7 +116,7 @@ const requireAnyRole = (roles = []) => {
 };
 
 // Helper function to check if user is admin
-const isAdmin = async (email) => {
+const isAdmin = async (email, db) => {
     try {
         const usersCollection = db.collection("users");
         const user = await usersCollection.findOne({ email });
@@ -125,7 +144,7 @@ app.post("/register-user", async (req, res) => {
             return res.status(400).json({ message: "All fields are required" });
         }
 
-        const usersCollection = db.collection("users");
+        const usersCollection = req.db.collection("users");
         const existingUser = await usersCollection.findOne({ email });
         if (existingUser) {
             return res.status(400).json({ message: "Email already exists" });
@@ -158,7 +177,7 @@ app.get("/get-user-role", async (req, res) => {
         const { email } = req.query;
         if (!email) return res.status(400).json({ message: "Email is required" });
 
-        const usersCollection = db.collection("users");
+        const usersCollection = req.db.collection("users");
         const user = await usersCollection.findOne({ email }, { projection: { role: 1, _id: 0 } });
 
         if (!user) return res.status(404).json({ message: "User not found" });
@@ -173,7 +192,7 @@ app.get("/get-user-role", async (req, res) => {
 // Get logged-in user profile
 app.get("/dashboard/profile", verifyFirebaseToken, async (req, res) => {
     try {
-        const usersCollection = db.collection("users");
+        const usersCollection = req.db.collection("users");
 
         const user = await usersCollection.findOne({ email: req.user.email });
 
@@ -196,7 +215,7 @@ app.get("/dashboard/profile", verifyFirebaseToken, async (req, res) => {
 app.put("/dashboard/profile", verifyFirebaseToken, async (req, res) => {
     try {
         const { name, bloodGroup, district, upazila, avatar } = req.body;
-        const usersCollection = db.collection("users");
+        const usersCollection = req.db.collection("users");
 
         await usersCollection.updateOne(
             { email: req.user.email },
@@ -217,14 +236,14 @@ app.post("/dashboard/create-donation-request", verifyFirebaseToken, async (req, 
     try {
         const { recipientName, recipientDistrict, recipientUpazila, hospitalName, address, bloodGroup, donationDate, donationTime, message } = req.body;
 
-        const usersCollection = db.collection("users");
+        const usersCollection = req.db.collection("users");
         const currentUser = await usersCollection.findOne({ email: req.user.email });
 
         if (!currentUser || currentUser.status === "blocked") {
             return res.status(403).json({ message: "Blocked user cannot create donation request" });
         }
 
-        const donationRequestsCollection = db.collection("donationRequests");
+        const donationRequestsCollection = req.db.collection("donationRequests");
 
         const newRequest = {
             requesterName: currentUser.name,
@@ -254,7 +273,7 @@ app.post("/dashboard/create-donation-request", verifyFirebaseToken, async (req, 
 // Get My Donation Requests
 app.get("/dashboard/my-donation-requests", verifyFirebaseToken, async (req, res) => {
     try {
-        const donationRequestsCollection = db.collection("donationRequests");
+        const donationRequestsCollection = req.db.collection("donationRequests");
         const { status, page = 1, limit = 10 } = req.query;
 
         const query = { requesterEmail: req.user.email };
@@ -279,7 +298,7 @@ app.get("/dashboard/my-donation-requests", verifyFirebaseToken, async (req, res)
 app.get("/donation-request/:id", verifyFirebaseToken, async (req, res) => {
     try {
         const { id } = req.params;
-        const donationRequestsCollection = db.collection("donationRequests");
+        const donationRequestsCollection = req.db.collection("donationRequests");
         const request = await donationRequestsCollection.findOne({ _id: new ObjectId(id) });
 
         if (!request) return res.status(404).json({ message: "Request not found" });
@@ -295,7 +314,7 @@ app.get("/donation-request/:id", verifyFirebaseToken, async (req, res) => {
 app.get("/dashboard/donation-request/:id", verifyFirebaseToken, async (req, res) => {
     try {
         const { id } = req.params;
-        const donationRequestsCollection = db.collection("donationRequests");
+        const donationRequestsCollection = req.db.collection("donationRequests");
         const request = await donationRequestsCollection.findOne({ _id: new ObjectId(id) });
 
         if (!request) return res.status(404).json({ message: "Request not found" });
@@ -313,13 +332,13 @@ app.put("/dashboard/donation-request/:id", verifyFirebaseToken, async (req, res)
         const { id } = req.params;
         const updates = req.body;
 
-        const donationRequestsCollection = db.collection("donationRequests");
+        const donationRequestsCollection = req.db.collection("donationRequests");
         const request = await donationRequestsCollection.findOne({ _id: new ObjectId(id) });
 
         if (!request) return res.status(404).json({ message: "Donation request not found" });
 
         // Check if user is admin or the requester
-        const userIsAdmin = await isAdmin(req.user.email);
+        const userIsAdmin = await isAdmin(req.user.email, req.db);
         if (!userIsAdmin && request.requesterEmail !== req.user.email) {
             return res.status(403).json({ message: "Not allowed" });
         }
@@ -337,13 +356,13 @@ app.put("/dashboard/donation-request/:id", verifyFirebaseToken, async (req, res)
 app.delete("/dashboard/donation-request/:id", verifyFirebaseToken, async (req, res) => {
     try {
         const { id } = req.params;
-        const donationRequestsCollection = db.collection("donationRequests");
+        const donationRequestsCollection = req.db.collection("donationRequests");
         const request = await donationRequestsCollection.findOne({ _id: new ObjectId(id) });
 
         if (!request) return res.status(404).json({ message: "Donation request not found" });
 
         // Check if user is admin or the requester
-        const userIsAdmin = await isAdmin(req.user.email);
+        const userIsAdmin = await isAdmin(req.user.email, req.db);
         if (!userIsAdmin && request.requesterEmail !== req.user.email) {
             return res.status(403).json({ message: "Not allowed" });
         }
@@ -363,7 +382,7 @@ app.put("/donation-request/:id/donate", verifyFirebaseToken, async (req, res) =>
         const { id } = req.params;
         const { donorName, donorEmail } = req.body;
 
-        const donationRequestsCollection = db.collection("donationRequests");
+        const donationRequestsCollection = req.db.collection("donationRequests");
         const request = await donationRequestsCollection.findOne({ _id: new ObjectId(id) });
 
         if (!request) return res.status(404).json({ message: "Request not found" });
@@ -392,7 +411,7 @@ app.put("/donation-request/:id/donate", verifyFirebaseToken, async (req, res) =>
 // Get total count of ALL users for Volunteer/Admin statistics
 app.get("/dashboard/total-users-count", verifyFirebaseToken, requireAnyRole(["admin", "volunteer"]), async (req, res) => {
     try {
-        const usersCollection = db.collection("users");
+        const usersCollection = req.db.collection("users");
 
         const totalUsers = await usersCollection.countDocuments({});
 
@@ -406,7 +425,7 @@ app.get("/dashboard/total-users-count", verifyFirebaseToken, requireAnyRole(["ad
 // Get All Donation Requests (Admin & Volunteer)
 app.get("/dashboard/all-blood-donation-request", verifyFirebaseToken, requireAnyRole(["admin", "volunteer"]), async (req, res) => {
     try {
-        const donationRequestsCollection = db.collection("donationRequests");
+        const donationRequestsCollection = req.db.collection("donationRequests");
         const { status, page = 1, limit = 10 } = req.query;
 
         const query = {};
@@ -429,7 +448,7 @@ app.put("/dashboard/donation-request/:id/status", verifyFirebaseToken, requireAn
         const { id } = req.params;
         const { status } = req.body;
 
-        const donationRequestsCollection = db.collection("donationRequests");
+        const donationRequestsCollection = req.db.collection("donationRequests");
         if (!["pending", "inprogress", "done", "canceled"].includes(status)) {
             return res.status(400).json({ message: "Invalid status" });
         }
@@ -459,7 +478,7 @@ app.put(
                 return res.status(400).json({ message: "Invalid status" });
             }
 
-            const donationRequestsCollection = db.collection("donationRequests");
+            const donationRequestsCollection = req.db.collection("donationRequests");
 
             const request = await donationRequestsCollection.findOne({
                 _id: new ObjectId(id),
@@ -498,7 +517,7 @@ app.put(
 // Get Pending Donation Requests (Public - no auth required)
 app.get("/donation-requests", async (req, res) => {
     try {
-        const donationRequestsCollection = db.collection("donationRequests");
+        const donationRequestsCollection = req.db.collection("donationRequests");
         const requests = await donationRequestsCollection
             .find({ status: "pending" })
             .sort({ createdAt: -1 })
@@ -516,7 +535,7 @@ app.get("/donation-requests", async (req, res) => {
 // Get All Users
 app.get("/dashboard/all-users", verifyFirebaseToken, requireRole("admin"), async (req, res) => {
     try {
-        const usersCollection = db.collection("users");
+        const usersCollection = req.db.collection("users");
         const { status, page = 1, limit = 10 } = req.query;
 
         const query = {};
@@ -538,7 +557,7 @@ app.put("/dashboard/user/:id", verifyFirebaseToken, requireRole("admin"), async 
         const { id } = req.params;
         const updates = req.body;
 
-        const usersCollection = db.collection("users");
+        const usersCollection = req.db.collection("users");
         await usersCollection.updateOne({ _id: new ObjectId(id) }, { $set: updates });
 
         res.status(200).json({ message: "User updated successfully" });
@@ -553,7 +572,7 @@ app.put("/dashboard/user/:id", verifyFirebaseToken, requireRole("admin"), async 
 app.get("/search-donors", async (req, res) => {
     try {
         const { bloodGroup, district, upazila } = req.query;
-        const usersCollection = db.collection("users");
+        const usersCollection = req.db.collection("users");
 
         const query = { role: "donor", status: "active" };
         if (bloodGroup) query.bloodGroup = bloodGroup;
@@ -572,8 +591,10 @@ app.get("/search-donors", async (req, res) => {
 // START SERVER 
 // For Vercel serverless
 export default async function handler(req, res) {
+    // Ensure database is connected
     await connectDB();
-    app(req, res);
+    // Handle the request through Express app
+    return app(req, res);
 }
 
 

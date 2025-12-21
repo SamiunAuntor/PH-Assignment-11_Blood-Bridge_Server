@@ -1,9 +1,12 @@
 # Blood Bridge - Blood Donation Management System
 
+**🌐 Live Server**: [https://blood-bridge-server-five.vercel.app/](https://blood-bridge-server-five.vercel.app/)  
 **Server Side Repository**: [Blood Bridge Server](https://github.com/SamiunAuntor/PH-Assignment-11_Blood-Bridge_Server)  
 **Client Side Repository**: [Blood Bridge Client](https://github.com/SamiunAuntor/PH-Assignment-11_Blood-Bridge_Client)
 
 A secure RESTful API backend for managing blood donation requests and connecting donors with recipients. Built with Node.js, Express.js, MongoDB, and Firebase Admin SDK. Provides role-based access control for Admin, Volunteer, and Donor roles.
+
+**✅ Deployment Status:** Successfully deployed on Vercel
 
 ---
 
@@ -142,15 +145,25 @@ MONGO_URI=mongodb+srv://username:password@cluster.mongodb.net/BloodBridge
 
 # Server Port (optional, defaults to 5000)
 PORT=5000
+
+# Firebase Service Account (Base64 encoded - for Vercel deployment)
+# For local development, use the JSON file instead
+FIREBASE_SERVICE_ACCOUNT=your_base64_encoded_firebase_json_string
 ```
 
 ### Firebase Setup
 
+**For Local Development:**
 1. Go to Firebase Console → Project Settings → Service Accounts
 2. Generate a new private key
 3. Download the JSON file
 4. Rename it to `bloodbridge-firebase-adminsdk.json`
 5. Place it in the root directory
+
+**For Vercel Deployment:**
+1. Convert the Firebase service account JSON to base64 (see Deployment section)
+2. Add the base64 string as `FIREBASE_SERVICE_ACCOUNT` environment variable in Vercel
+3. The server will automatically decode and use it (already configured in `index.js`)
 
 ---
 
@@ -382,43 +395,147 @@ Authorization: Bearer <firebase-id-token>
 
 ## 🚀 Deployment
 
-### Recommended Platforms
+### Vercel Deployment (Recommended)
 
-* **Vercel** - Serverless functions
-* **Render** - Full-stack hosting
-* **Railway** - Container-based deployment
-* **Heroku** - Platform as a service
+This server is deployed on **Vercel** as serverless functions. The live server is available at:
 
-### Deployment Steps
+**🌐 Live Server URL:** [https://blood-bridge-server-five.vercel.app/](https://blood-bridge-server-five.vercel.app/)
 
-1. **Set up MongoDB Atlas**
-   * Create a cluster
-   * Get connection string
-   * Add your IP to whitelist
+### Step-by-Step Vercel Deployment Guide
 
-2. **Set up Firebase**
-   * Create Firebase project
-   * Generate service account key
-   * Download JSON file
+#### Step 1: Prepare Your Code
 
-3. **Configure Environment Variables**
-   * Add `MONGO_URI` to deployment platform
-   * Add `PORT` (if required)
-   * Upload Firebase service account JSON securely
+1. **Comment out any await commands outside API methods** (to prevent gateway timeout errors)
+   ```js
+   // Comment following commands if present:
+   // await client.db("admin").command({ ping: 1 });
+   ```
 
-4. **Deploy**
-   * Connect your repository
-   * Configure build settings
-   * Deploy
+2. **Ensure `vercel.json` is configured** (already included in the project):
+   ```json
+   {
+     "version": 2,
+     "builds": [
+       {
+         "src": "index.js",
+         "use": "@vercel/node"
+       }
+     ],
+     "routes": [
+       {
+         "src": "/(.*)",
+         "dest": "index.js",
+         "methods": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+       }
+     ]
+   }
+   ```
+
+#### Step 2: Convert Firebase Service Account to Base64
+
+1. **Create a script to convert Firebase JSON to base64:**
+   ```js
+   // convert-firebase-key.js
+   const fs = require('fs');
+   const key = fs.readFileSync('./bloodbridge-firebase-adminsdk.json', 'utf8')
+   const base64 = Buffer.from(key).toString('base64')
+   console.log(base64)
+   ```
+
+2. **Run the script:**
+   ```bash
+   node convert-firebase-key.js
+   ```
+
+3. **Copy the base64 string** - you'll need it for Vercel environment variables
+
+#### Step 3: Deploy to Vercel
+
+1. **Install Vercel CLI (if not already installed):**
+   ```bash
+   npm i -g vercel
+   ```
+
+2. **Login to Vercel:**
+   ```bash
+   vercel login
+   ```
+
+3. **Deploy to preview:**
+   ```bash
+   vercel
+   ```
+
+4. **Deploy to production:**
+   ```bash
+   vercel --prod
+   ```
+
+5. **After deployment completes:**
+   - Click on the inspect link provided
+   - Copy the production domain (e.g., `https://your-project.vercel.app`)
+
+#### Step 4: Configure Environment Variables in Vercel
+
+1. **Go to Vercel Dashboard:**
+   - Visit [https://vercel.com/dashboard](https://vercel.com/dashboard)
+   - Select your project
+
+2. **Navigate to Settings → Environment Variables**
+
+3. **Add the following environment variables:**
+
+   **Required Variables:**
+   - `MONGO_URI` - Your MongoDB Atlas connection string
+     ```
+     mongodb+srv://username:password@cluster.mongodb.net/BloodBridge
+     ```
+   
+   - `FIREBASE_SERVICE_ACCOUNT` - Base64 encoded Firebase service account JSON
+     - Paste the base64 string you generated in Step 2
+
+4. **Set Environment for Each Variable:**
+   - Select **Production**, **Preview**, and **Development**
+   - Click **Save** for each variable
+
+5. **Redeploy after adding environment variables:**
+   - Go to **Deployments** tab
+   - Click **Redeploy** on the latest deployment
+
+#### Step 5: Verify Deployment
+
+1. **Test the root endpoint:**
+   ```bash
+   curl https://your-project.vercel.app/
+   ```
+   Expected response: `"Blood Bridge is donating blood"`
+
+2. **Test a public API endpoint:**
+   ```bash
+   curl https://your-project.vercel.app/donation-requests
+   ```
+
+3. **Check Vercel Function Logs:**
+   - Go to **Deployments** → Click on your deployment → **Functions** tab
+   - Monitor for any errors
 
 ### Important Deployment Notes
 
-* ✅ Ensure CORS is configured to allow client domain
-* ✅ Add client domain to Firebase authorized domains
-* ✅ Verify MongoDB connection string is correct
-* ✅ Ensure Firebase service account JSON is accessible
-* ✅ Test all endpoints after deployment
-* ✅ Monitor server logs for errors
+* ✅ **Never commit** `.env` files or Firebase credentials to version control
+* ✅ **Always use base64 encoding** for Firebase service account in Vercel
+* ✅ **Comment out** any database ping commands outside API methods to prevent timeout errors
+* ✅ **Ensure CORS** is configured to allow client domain
+* ✅ **Add client domain** to Firebase authorized domains
+* ✅ **Verify MongoDB connection string** is correct and IP whitelist includes Vercel IPs (or use `0.0.0.0/0`)
+* ✅ **Test all endpoints** after deployment
+* ✅ **Monitor server logs** in Vercel dashboard for errors
+
+### Current Deployment Status
+
+✅ **Server Status:** Live and Running  
+🌐 **Production URL:** [https://blood-bridge-server-five.vercel.app/](https://blood-bridge-server-five.vercel.app/)  
+📊 **Platform:** Vercel Serverless Functions  
+🔧 **Configuration:** `vercel.json` configured for all HTTP methods
 
 ---
 
@@ -429,6 +546,7 @@ blood-bridge-server/
 ├── index.js                          # Main server file
 ├── package.json                      # Dependencies and scripts
 ├── package-lock.json                 # Locked dependencies
+├── vercel.json                       # Vercel deployment configuration
 ├── .env                              # Environment variables (not in repo)
 ├── .gitignore                        # Git ignore rules
 ├── bloodbridge-firebase-adminsdk.json # Firebase Admin SDK credentials (not in repo)
@@ -534,8 +652,10 @@ curl -X GET http://localhost:5000/dashboard/profile \
 
 ## 🔗 Related Links
 
+* **🌐 Live Server**: [https://blood-bridge-server-five.vercel.app/](https://blood-bridge-server-five.vercel.app/)
 * **Server Repository**: [Blood Bridge Server](https://github.com/SamiunAuntor/PH-Assignment-11_Blood-Bridge_Server)
 * **Client Repository**: [Blood Bridge Client](https://github.com/SamiunAuntor/PH-Assignment-11_Blood-Bridge_Client)
+* **Vercel Dashboard**: [https://vercel.com/dashboard](https://vercel.com/dashboard)
 * **MongoDB Atlas**: [https://www.mongodb.com/cloud/atlas](https://www.mongodb.com/cloud/atlas)
 * **Firebase Console**: [https://console.firebase.google.com](https://console.firebase.google.com)
 * **Express.js Documentation**: [https://expressjs.com](https://expressjs.com)
