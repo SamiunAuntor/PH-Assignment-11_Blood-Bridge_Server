@@ -4,20 +4,20 @@ import cors from "cors";
 import dotenv from "dotenv";
 import { MongoClient, ObjectId } from "mongodb";
 import admin from "firebase-admin";
-import fs from "fs";
-import path from "path";
+
 
 dotenv.config();
 
 // FIREBASE SETUP
 // Read Firebase service account JSON
-const serviceAccountPath = path.resolve("./bloodbridge-firebase-adminsdk.json");
-const serviceAccount = JSON.parse(fs.readFileSync(serviceAccountPath, "utf-8"));
+if (!admin.apps.length) {
+    admin.initializeApp({
+        credential: admin.credential.cert(
+            JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT)
+        ),
+    });
+}
 
-// Initialize Firebase Admin SDK
-admin.initializeApp({
-    credential: admin.credential.cert(serviceAccount),
-});
 
 // EXPRESS SETUP
 const app = express();
@@ -570,12 +570,10 @@ app.get("/search-donors", async (req, res) => {
 });
 
 // START SERVER 
-const PORT = process.env.PORT || 5000;
-
-connectDB().then(() => {
-    app.listen(PORT, () => {
-        console.log(`Server running at: \x1b[34mhttp://localhost:${PORT}\x1b[0m`);
-    });
-});
+// For Vercel serverless
+export default async function handler(req, res) {
+    await connectDB();
+    app(req, res);
+}
 
 
