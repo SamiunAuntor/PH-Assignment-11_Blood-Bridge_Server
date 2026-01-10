@@ -295,7 +295,7 @@ app.get("/dashboard/my-donation-requests", verifyFirebaseToken, async (req, res)
 });
 
 // Get Single Donation Request (Public)
-app.get("/donation-request/:id", verifyFirebaseToken, async (req, res) => {
+app.get("/donation-request/:id", async (req, res) => {
     try {
         const { id } = req.params;
         const donationRequestsCollection = req.db.collection("donationRequests");
