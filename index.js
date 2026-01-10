@@ -588,6 +588,37 @@ app.get("/search-donors", async (req, res) => {
     }
 });
 
+// Get Public Statistics (Public - no auth required)
+app.get("/public-stats", async (req, res) => {
+    try {
+        const usersCollection = req.db.collection("users");
+        const donationRequestsCollection = req.db.collection("donationRequests");
+
+        // Count active users (status === "active")
+        const totalActiveUsers = await usersCollection.countDocuments({ status: "active" });
+
+        // Count all donation requests
+        const totalDonationRequests = await donationRequestsCollection.countDocuments({});
+
+        // Count successful donations (status === "done")
+        const totalSuccessfulDonations = await donationRequestsCollection.countDocuments({ status: "done" });
+
+        // Total fund raised (static)
+        const totalFundRaised = 2.5;
+
+        res.status(200).json({
+            totalActiveUsers,
+            totalDonationRequests,
+            totalSuccessfulDonations,
+            totalFundRaised
+        });
+    } catch (err) {
+        console.error(err);
+        res.status(500).json({ message: "Server error" });
+    }
+});
+
+
 // START SERVER 
 // For Vercel serverless
 export default async function handler(req, res) {
