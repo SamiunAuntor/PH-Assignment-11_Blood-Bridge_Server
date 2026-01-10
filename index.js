@@ -431,9 +431,14 @@ app.get("/dashboard/all-blood-donation-request", verifyFirebaseToken, requireAny
         const query = {};
         if (status) query.status = status;
 
-        const cursor = donationRequestsCollection.find(query).sort({ createdAt: -1 });
-        const total = await cursor.count();
-        const requests = await cursor.skip((page - 1) * limit).limit(parseInt(limit)).toArray();
+        // Use countDocuments() instead of cursor.count()
+        const total = await donationRequestsCollection.countDocuments(query);
+        const requests = await donationRequestsCollection
+            .find(query)
+            .sort({ createdAt: -1 })
+            .skip((page - 1) * limit)
+            .limit(parseInt(limit))
+            .toArray();
 
         res.status(200).json({ total, page: parseInt(page), limit: parseInt(limit), requests });
     } catch (err) {
